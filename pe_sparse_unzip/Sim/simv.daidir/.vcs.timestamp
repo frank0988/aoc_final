@@ -1,0 +1,144 @@
+0
+31
++define+FSDB
++itf+/usr/cad/synopsys/vcs/2024.09-sp2/linux64/lib/vcsdp_lite.tab
++vcsd1
++vpi
+-Mamsrun=
+-Masflags=
+-Mcc=gcc
+-Mcfl= -pipe -fPIC -O -I/usr/cad/synopsys/vcs/2024.09-sp2/include
+-Mcplusplus=g++
+-Mcrt0=
+-Mcrtn=
+-Mcsrc=
+-Mexternalobj=
+-Mldflags= -rdynamic
+-Mobjects= /usr/cad/synopsys/vcs/2024.09-sp2/linux64/lib/libvirsim.so /usr/cad/synopsys/vcs/2024.09-sp2/linux64/lib/liberrorinf.so /usr/cad/synopsys/vcs/2024.09-sp2/linux64/lib/libsnpsmalloc.so /usr/cad/synopsys/vcs/2024.09-sp2/linux64/lib/libvfs.so
+-Mout=simv
+-Msaverestoreobj=/usr/cad/synopsys/vcs/2024.09-sp2/linux64/lib/vcs_save_restore_new.o
+-Msyslibs=/usr/cad/synopsys/verdi/2024.09-sp2/share/PLI/VCS/LINUX64/pli.a -ldl
+-Mvcsaceobjs=
+-Mxcflags= -pipe -fPIC -I/usr/cad/synopsys/vcs/2024.09-sp2/include
+-Mxllcflags=
+-P
+-debug_access+all
+-fsdb
+-full64
+-gen_obj
+-picarchive
+-sverilog
+/usr/cad/synopsys/vcs/2024.09-sp2/linux64/bin/vcs1
+/usr/cad/synopsys/verdi/2024.09-sp2/share/PLI/VCS/LINUX64/verdi.tab
+pe_block_7x3_tb.sv
+96
+which_declare=declare -f
+mraarch=linux_64
+installdir=/usr/cad/synopsys/hspice/2026.03/hspice
+__MODULES_SHARE_MANPATH=:1
+__MODULES_LMINIT=module use --append /usr/share/Modules/modulefiles:module use --append /etc/modulefiles:module use --append /usr/share/modulefiles
+_CONDA_ROOT=/home/bigthousand1021/miniconda3
+_CONDA_EXE=/home/bigthousand1021/miniconda3/bin/conda
+_CE_M=
+_CE_CONDA=
+XLIB_SKIP_ARGB_VISUALS=1
+XDG_SESSION_TYPE=tty
+XDG_SESSION_ID=221
+XDG_SESSION_CLASS=user
+XDG_RUNTIME_DIR=/run/user/1000
+XDG_DATA_DIRS=/home/bigthousand1021/.local/share/flatpak/exports/share:/var/lib/flatpak/exports/share:/usr/local/share:/usr/share
+XARCH=linux64
+VMR_MODE_FLAG=64
+VERILATOR_ROOT=/usr/local/share/verilator
+VERDI_HOME=/usr/cad/synopsys/verdi/2024.09-sp2
+VCS_STATIC_HOME=/usr/cad/synopsys/vcs/2024.09-sp2/vcfca
+VCS_PYTHON3=/usr/cad/synopsys/vcs/2024.09-sp2/linux64/bin/Python3/bin/python3
+VCS_PATHMAP_PRELOAD_DONE=1
+VCS_MX_HOME_INTERNAL=1
+VCS_MODE_FLAG=64
+VCS_INTERNAL_CONVERTEDLIBS=
+VCS_HOME=/usr/cad/synopsys/vcs/2024.09-sp2
+VCS_EXEC_DONE=1
+VCS_DEPTH=0
+VCS_CC=gcc
+VCS_ARG_ADDED_FOR_TMP=1
+VCS_ARCH=linux64
+UNAME=/bin/uname
+TOOL_HOME=/usr/cad/synopsys/vcs/2024.09-sp2/linux64
+TMIARCH=_64
+S_COLORS=auto
+SYN_MAN_DIR=/usr/cad/synopsys/star-rcxt/2024.09-sp4/starrc/man
+SYNOPSYS_SYSTYPE=LINUX.64
+SYNOPSYS_NCX_ROOT=/usr/cad/synopsys/star-rcxt/2024.09-sp4
+SYNOPSYS_LC_ROOT=/usr/cad/synopsys/lc/cur
+STDB=/home/bigthousand1021/sentaurus_projects
+SSH_TTY=/dev/pts/9
+SSH_CONNECTION=192.168.50.1 57858 192.168.50.99 22
+SSH_CLIENT=192.168.50.1 57858 22
+SPAPI_AHDL_INCLUDE=/usr/cad/synopsys/hspice/2026.03/hspice/include
+SNPS_VCS_PYTHON3=/usr/cad/synopsys/vcs/2024.09-sp2/linux64/bin/Python3/bin/python3
+SNPS_VCS_CLANG_PATH=/usr/cad/synopsys/vcs/2024.09-sp2/linux64/clang
+SNPS_PLATFORM=linux64
+SNPS_INTERNAL_VCS_LINUX_OS=linux
+SNPS_64=1
+SHLIB_PATH=/usr/cad/synopsys/verdi/2024.09-sp2/etc/lib/libstdc++/LINUX64:/usr/cad/synopsys/verdi/2024.09-sp2/share/PLI/lib/LINUX64:/usr/cad/synopsys/verdi/2024.09-sp2/share/PLI/VCS/LINUX64
+SELINUX_USE_CURRENT_RANGE=
+SELINUX_ROLE_REQUESTED=
+SELINUX_LEVEL_REQUESTED=
+SCRNAME=vcs
+SCRIPT_NAME=vcs
+SALT_LICENSE_SERVER=1717@lstc
+SALT_LICENSE_FILE=1717@lstc
+OVA_UUM=0
+MOTD_SHOWN=pam
+MODULES_RUN_QUARANTINE=LD_LIBRARY_PATH LD_PRELOAD
+MODULES_CMD=/usr/share/Modules/libexec/modulecmd.tcl
+MODULESHOME=/usr/share/Modules
+MODULEPATH=/etc/scl/modulefiles:/usr/share/Modules/modulefiles:/etc/modulefiles:/usr/share/modulefiles
+MGC_TMPDIR=/tmp
+MGC_LOCATION_MAP=NO_MAP
+MGC_HOME=/usr/cad/mentor/calibre/aoj_cal_2024.4_12.9
+Laker_TCL_ToolBox=1
+Laker_TCL_L3=1
+LOADEDMODULES=
+LESSOPEN=||/usr/bin/lesspipe.sh %s
+LC_ALL=C
+ICV_HOME_DIR=/usr/cad/synopsys/icvalidator/2023.12-sp5-2
+HSP_SIGMA_AMP=/usr/cad/synopsys/hspice/2026.03/hspice/linux64/python/AVA/ava
+HSP_HOME=/usr/cad/synopsys/hspice/2026.03/hspice
+HSP_GCC_VERSION=13.3.0
+HSP_GCC=/usr/cad/synopsys/hspice/2026.03/hspice/GNU/linux64/gcc/bin/gcc -m64 
+HISTCONTROL=ignoredups
+DEBUGINFOD_IMA_CERT_PATH=/etc/keys/ima:
+DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus
+CONDA_SHLVL=1
+CONDA_PYTHON_EXE=/home/bigthousand1021/miniconda3/bin/python
+CONDA_PROMPT_MODIFIER=(base) 
+CONDA_PREFIX=/home/bigthousand1021/miniconda3
+CONDA_EXE=/home/bigthousand1021/miniconda3/bin/conda
+CONDA_DEFAULT_ENV=base
+CMIARCH=_64
+CDS_LOAD_ENV=CSF
+CDSHOME=/usr/cad/cadence/IC/IC_25.10.010
+CALIBRE_HOME=/usr/cad/mentor/calibre/aoj_cal_2024.4_12.9
+CALIBRE_DISABLE_RHEL7_WARNING=1
+BASH_FUNC_which%%=() {  ( alias;_ eval ${which_declare} ) | /usr/bin/which --tty-only --read-alias --read-functions --show-tilde --show-dot $@_}
+BASH_FUNC_scl%%=() {  if [ "$1" = "load" -o "$1" = "unload" ]; then_ eval "module $@";_ else_ /usr/bin/scl "$@";_ fi_}
+BASH_FUNC_module%%=() {  local _mlredir=1;_ if [ -n "${MODULES_REDIRECT_OUTPUT+x}" ]; then_ if [ "$MODULES_REDIRECT_OUTPUT" = '0' ]; then_ _mlredir=0;_ else_ if [ "$MODULES_REDIRECT_OUTPUT" = '1' ]; then_ _mlredir=1;_ fi;_ fi;_ fi;_ case " $@ " in _ *' --no-redirect '*)_ _mlredir=0_ ;;_ *' --redirect '*)_ _mlredir=1_ ;;_ esac;_ if [ $_mlredir -eq 0 ]; then_ _module_raw "$@";_ else_ _module_raw "$@" 2>&1;_ fi_}
+BASH_FUNC_ml%%=() {  module ml "$@"_}
+BASH_FUNC__module_raw%%=() {  eval "$(/usr/bin/tclsh '/usr/share/Modules/libexec/modulecmd.tcl' bash "$@")";_ _mlstatus=$?;_ return $_mlstatus_}
+ARCH=linux64
+0
+0
+4
+1781421041 ../Src/pe_block_7x3.v
+1781421041 pe_block_7x3_tb.sv
+1741065587 /usr/cad/synopsys/verdi/2024.09-sp2/share/PLI/VCS/LINUX64/verdi.tab
+1740888368 /usr/cad/synopsys/vcs/2024.09-sp2/linux64/lib/vcsdp_lite.tab
+4
+1740891987 /usr/cad/synopsys/vcs/2024.09-sp2/linux64/lib/libvirsim.so
+1740889567 /usr/cad/synopsys/vcs/2024.09-sp2/linux64/lib/liberrorinf.so
+1740889560 /usr/cad/synopsys/vcs/2024.09-sp2/linux64/lib/libsnpsmalloc.so
+1740889556 /usr/cad/synopsys/vcs/2024.09-sp2/linux64/lib/libvfs.so
+1781421094 simv.daidir
+-1 partitionlib

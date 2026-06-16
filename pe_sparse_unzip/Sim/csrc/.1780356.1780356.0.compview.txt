@@ -1,0 +1,9 @@
+{"vcs1":{"timestamp_begin":1781421092.684475992, "rt":0.72, "ut":0.19, "st":0.12}}
+{"vcselab":{"timestamp_begin":1781421093.498362736, "rt":0.57, "ut":0.16, "st":0.09}}
+{"link":{"timestamp_begin":1781421094.131205753, "rt":0.21, "ut":0.12, "st":0.09}}
+{"SNPS_VCS_INTERNAL_ROOT_START_TIME": 1781421092.348043110}
+{"VCS_COMP_START_TIME": 1781421092.348043110}
+{"VCS_COMP_END_TIME": 1781421094.476588522}
+{"VCS_USER_OPTIONS": "-full64 -sverilog -debug_access+all +define+FSDB pe_block_7x3_tb.sv"}
+{"vcs1": {"peak_mem": 285324}}
+{"vcselab": {"peak_mem": 153676}}
