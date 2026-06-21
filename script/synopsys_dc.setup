@@ -1,0 +1,36 @@
+#Set Design Environments
+
+set company "CIC"
+set designer "Student"
+
+set CoreSearchPath  [list /usr/cad/CBDK/Executable_Package/Collaterals/IP/stdcell/N16ADFP_StdCell/NLDM]
+set IOSearchPath    [list /usr/cad/CBDK/Executable_Package/Collaterals/IP/stdio/N16ADFP_StdIO/NLDM/]
+set DefinitionPath  [list ../src ../hw ../SRAM]
+
+set search_path [concat \
+    $CoreSearchPath \
+    $IOSearchPath \
+    $DefinitionPath
+]
+
+set target_library [list \
+    N16ADFP_StdCellss0p72vm40c.db \
+    N16ADFP_StdCellff0p88v125c.db \
+    N16ADFP_StdIOss0p72v1p62v125c.db \
+    N16ADFP_StdIOff0p88v1p98vm40c.db \
+    ../SRAM/SRAM_ss0p72v0p72vm40c_100a.db \
+    ../SRAM/SRAM_ff0p88v0p88v125c_100a.db
+]
+                     
+set synthetic_library [list dw_foundation.sldb]
+set link_library [concat "*" $target_library $synthetic_library]
+set symbol_library "generic_sdb"
+
+set_min_library N16ADFP_StdIOss0p72v1p62v125c.db -min N16ADFP_StdIOff0p88v1p98vm40c.db
+set_min_library SRAM_ss0p72v0p72vm40c_100a.db -min SRAM_ff0p88v0p88v125c_100a.db
+
+set verilogout_no_tri true
+set hdlin_enable_presto_for_vhdl "TRUE"
+set sh_enable_line_editing true
+history keep 100
+alias h history

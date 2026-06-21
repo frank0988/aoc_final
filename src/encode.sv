@@ -33,7 +33,7 @@ package rlc_encode_pkg;
     );
         rlc_token_t token;
         token = '0;
-        token[0]     = !last;
+        token[0]     = last;
         token[56:1]  = payload;
         token[63:57] = zero_run[RLC_RUN_BITS-1:0];
         return token;

@@ -1,6 +1,7 @@
 `include "define.svh"
 module PostQuant (
     input [`DATA_BITS-1:0] data_in,
+    input signed [`DATA_BITS-1:0] bias_i,
     input [5:0] scaling_factor,
     output logic [7:0] data_out
 );
@@ -8,9 +9,14 @@ module PostQuant (
     // ==========================================
     // 1. Scaling (縮放): 等效於除以 2^n
     // ==========================================
-    // 使用算術右移 (>>>) 來保留符號位元
+    // The generated integer bias includes the per-channel correction needed to
+    // reproduce PyTorch's floating requantization around half-LSB boundaries.
     logic signed [`DATA_BITS-1:0] scaled_data;
-    assign scaled_data = $signed(data_in) >>> scaling_factor;
+    logic signed [`DATA_BITS-1:0] rounding_offset;
+
+    assign rounding_offset = (scaling_factor == 0) ? '0 :
+                             ({{(`DATA_BITS-1){1'b0}}, 1'b1} <<< (scaling_factor - 1'b1));
+    assign scaled_data = ($signed(data_in) + bias_i + rounding_offset) >>> scaling_factor;
 
     // ==========================================
     // 2. 邊界偵測 (Bounds Detection)
@@ -39,13 +45,13 @@ module PostQuant (
     // 如果發生溢位，正數(sign=0)要截斷成 255 (8'b1111_1111)，負數(sign=1)要截斷成 0 (8'b0)
     // 恰好可以用 ~sign 擴充成 8 bits 來達成！
     logic [7:0] sat_val;
-    assign sat_val = {8{~sign}}; 
+    assign sat_val = {8{~sign}};
 
     // ==========================================
     // 4. Clamping 輸出 (無比較器/分支設計)
     // ==========================================
-    // 利用 Bitwise AND/OR 來實現硬體 MUX，不使用 if-else 
+    // 利用 Bitwise AND/OR 來實現硬體 MUX，不使用 if-else
     assign data_out = ({8{in_bounds}} & base_val) | ({8{out_bounds}} & sat_val);
-    
+
 
 endmodule

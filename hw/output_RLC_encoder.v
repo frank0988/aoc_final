@@ -10,6 +10,7 @@ module output_RLC_encoder (
     input ppu_valid_i,  // Upstream asserts when ppu_data_i is valid.
     input ppu_last_i,  // Marks the final vector in the output stream.
     output ppu_ready_o,  // Encoder asserts when it can accept one PPU vector.
+    input [55:0] zero_vec_i,  // Quantized zero vector to omit from the RLC stream.
 
     // Output RLC token stream.
     // token = {RUN[6:0], vector[55:0], term}
@@ -36,7 +37,7 @@ wire emit_tail_token;
 wire emit_ppu_token;
 wire split_last_zero_run;
 
-assign vec_is_zero = (ppu_data_i == 56'd0);
+assign vec_is_zero = (ppu_data_i == zero_vec_i);
 assign token_fire = token_valid_o && token_ready_i;
 assign token_slot_ready = !token_valid_o || token_ready_i;
 
@@ -51,7 +52,7 @@ assign split_last_zero_run = ppu_fire && vec_is_zero && ppu_last_i && run_count 
 // Controller status.
 assign ctrl_busy_o = token_valid_o || tail_pending || (run_count != 7'd0);
 assign ctrl_token_fire_o = token_fire;
-assign ctrl_done_o = token_fire && !token_data_o[0];
+assign ctrl_done_o = token_fire && token_data_o[0];
 
 // output token valid control
 always @(posedge clk or posedge rst) begin
@@ -70,24 +71,24 @@ always @(posedge clk or posedge rst) begin
         token_data_o <= 64'd0;
     end else if (emit_tail_token) begin
         // Emit the terminal tail-zero token after a full RUN continuation.
-        token_data_o <= {tail_run, 56'd0, 1'b0};
+        token_data_o <= {tail_run, 56'd0, 1'b1};
     end else if (emit_ppu_token) begin
         if (vec_is_zero) begin
             if (ppu_last_i) begin
                 if (run_count == 7'd127) begin
                     // The last vector still overflows RUN, so split it into two tokens.
-                    token_data_o <= {7'd127, 56'd0, 1'b1};
+                    token_data_o <= {7'd127, 56'd0, 1'b0};
                 end else begin
                     // Stream ends with zero vectors.
-                    token_data_o <= {run_count + 7'd1, 56'd0, 1'b0};
+                    token_data_o <= {run_count + 7'd1, 56'd0, 1'b1};
                 end
             end else begin
                 // A long zero run uses a continuation token.
-                token_data_o <= {7'd127, 56'd0, 1'b1};
+                token_data_o <= {7'd127, 56'd0, 1'b0};
             end
         end else begin
             // Non-zero vector: emit the accumulated RUN and this vector.
-            token_data_o <= {run_count, ppu_data_i, !ppu_last_i};
+            token_data_o <= {run_count, ppu_data_i, ppu_last_i};
         end
     end
 end

@@ -8,7 +8,7 @@ package rlc_decode_pkg;
     endfunction
 
     function automatic bit rlc_token_last(input rlc_token_t token);
-        return !rlc_token_term(token);
+        return rlc_token_term(token);
     endfunction
 
     function automatic int unsigned rlc_token_run(input rlc_token_t token);
@@ -23,6 +23,6 @@ package rlc_decode_pkg;
         input rlc_vec_t vec,
         input int unsigned lane
     );
-        return vec[(RLC_LANES - 1 - lane) * RLC_LANE_BITS +: RLC_LANE_BITS];
+        return vec[lane * RLC_LANE_BITS +: RLC_LANE_BITS];
     endfunction
 endpackage

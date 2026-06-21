@@ -11,6 +11,7 @@ module PPU #(
     input  logic                        in_last,
 
     // PPU configuration
+    input  logic signed [DATA_BITS-1:0] bias_i,
     input  logic [5:0]                  scaling_factor,
     input  logic                        maxpool_en,
     input  logic                        maxpool_init,
@@ -35,6 +36,7 @@ module PPU #(
     // stateful Maxpool_Qint8 stream stage between them.
     PostQuant u_post_quant (
         .data_in        (data_in),
+        .bias_i         (bias_i),
         .scaling_factor (scaling_factor),
         .data_out       (post_quant_out)
     );

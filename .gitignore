@@ -1,0 +1,84 @@
+# ============================================================
+# AOC final project gitignore
+# Keep source RTL/TB/scripts/docs; ignore generated outputs/data.
+# ============================================================
+
+# Verilator / simulation build outputs
+obj_dir/
+obj_dir_trace/
+build/
+*.o
+*.a
+*.d
+*.so
+*.exe
+*.out
+*.log
+*.key
+*.vcd
+*.fst
+*.fsdb
+*.vpd
+*.wlf
+*.saif
+*.jou
+*.pb
+*.str
+*.history
+*.diag
+*.diag.tmp
+
+# Waveforms and full-path dumps
+waves/
+*.dump
+*.trace
+*_vectors.txt
+
+# Synthesis / implementation outputs
+syn/
+*.ddc
+*.sdc.out
+*.spef
+*.sdf
+*.svf
+*.mr
+*.pvl
+*.syn
+*.rpt
+*.rep
+*.mapped.v
+*.vg
+*.netlist.v
+
+# Python cache / virtual environments
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+.env
+
+# Generated layer/test data; regenerate with tools/gen_vwa_layer_data.py
+VWA/testbench/layer_data/
+
+# Raw datasets should not be committed
+# Keep a README/instructions instead of the original CIFAR-10 dataset files.
+data/cifar10/
+
+# Old external/course simulation copies and generated simulator products
+pe_sparse_unzip/Sim/
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+*~
+*.swp
+*.swo
+.vscode/
+.idea/
+*.Zone.Identifier
+*#*Zone.Identifier
+
+# Optional local-only files
+.local/
+secrets/

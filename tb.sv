@@ -5,9 +5,9 @@ module tb;
     import rlc_decode_pkg::*;
     import weight_tb_pkg::*;
 
-    localparam int MAX_VALUES = 8192;
-    localparam int MAX_VECS   = 2048;
-    localparam int MAX_TOKENS = 4096;
+    localparam int MAX_VALUES = 1000000;
+    localparam int MAX_VECS   = 150000;
+    localparam int MAX_TOKENS = 150000;
 
     typedef logic [23:0] filter_beat_t;
 
@@ -25,7 +25,9 @@ module tb;
     int full_hw_path_arg;
     int full_hw_packet_limit_arg;
     int stream_hw_path_arg;
+    int vwa_layer_mode_arg;
     int stream_input_scalars_arg;
+    int vwa_layer_arg;
 
     bit process_golden_psum;
     int scaling_factor;
@@ -34,23 +36,33 @@ module tb;
     bit full_hw_path;
     int full_hw_packet_limit;
     bit stream_hw_path;
+    bit vwa_layer_mode;
     int stream_input_scalars;
+    int vwa_layer;
 
     string ifmap_file;
     string weight_file;
     string golden_file;
+    string bias_file;
+    string requant_shift_file;
     string trace_file;
     string stream_hw_out_file;
+    string full_hw_out_file;
 
     int ifmap_values  [0:MAX_VALUES-1];
     int weight_values [0:MAX_VALUES-1];
     int golden_values [0:MAX_VALUES-1];
     int golden_ppu_values [0:MAX_VALUES-1];
+    int bias_values [0:MAX_VALUES-1];
+    int requant_shift_values [0:MAX_VALUES-1];
 
     int ifmap_count;
     int weight_count;
     int golden_count;
     int golden_ppu_count;
+    int bias_count;
+    int requant_shift_count;
+    int requant_shift;
 
     rlc_vec_t ifmap_vecs       [0:MAX_VECS-1];
     rlc_vec_t ifmap_roundtrip  [0:MAX_VECS-1];
@@ -92,10 +104,22 @@ module tb;
     rlc_vec_t dec_sram_rdata_o;
 
     logic weight_sram_wen_i = 1'b0;
-    logic [15:0] weight_sram_waddr_i = 16'd0;
+    logic [19:0] weight_sram_waddr_i = 20'd0;
     filter_beat_t weight_sram_wdata_i = '0;
     logic weight_sram_ready_o;
-    logic [15:0] weight_sram_raddr_i = 16'd0;
+    logic [19:0] weight_sram_raddr_i = 20'd0;
+    logic weight_preload_done_i = 1'b1;
+    logic weight_preload_wen_i = 1'b0;
+    logic weight_preload_sram_sel_i = 1'b0;
+    logic [10:0] weight_preload_addr_i = '0;
+    filter_beat_t weight_preload_wdata_i = '0;
+    logic weight_preload_start_o;
+    logic weight_compute_sram_sel_o;
+    logic weight_preload_sram_sel_o;
+    logic [8:0] weight_current_m_o;
+    logic [8:0] weight_next_m_o;
+    logic weight_compute_done_o;
+    logic weight_swap_enable_o;
     filter_beat_t weight_sram_rdata_o;
 
     rlc_vec_t enc_ppu_data_i = '0;
@@ -109,6 +133,8 @@ module tb;
     logic ppu_scalar_last_i = 1'b0;
     logic ppu_scalar_ready_o;
     logic [5:0] ppu_scaling_factor_i = 6'd0;
+    logic signed [31:0] ppu_bias_i;
+    logic [8:0] ppu_channel_o;
     logic ppu_relu_en_i = 1'b1;
     logic ppu_maxpool_en_i = 1'b0;
     logic ppu_maxpool_init_i = 1'b0;
@@ -119,6 +145,9 @@ module tb;
     logic pe_accum_ready_o;
     logic pe_mode_1x1_i = 1'b0;
     rlc_vec_t pe_ifmap_data_i = '0;
+    rlc_vec_t pe_ifmap_1x1_data_0_i = '0;
+    rlc_vec_t pe_ifmap_1x1_data_1_i = '0;
+    rlc_vec_t pe_ifmap_1x1_data_2_i = '0;
     filter_beat_t pe_weight_data_i = '0;
     logic pe_accum_last_i = 1'b0;
     logic [9:0] pe_accum_base_idx_i = 10'd0;
@@ -126,7 +155,7 @@ module tb;
     logic output_use_controller_i = 1'b0;
     logic [29:0] controller_config_i = '0;
     logic [15:0] controller_ifmap_base_addr_i = 16'd0;
-    logic [15:0] controller_filter_base_addr_i = 16'd0;
+    logic [19:0] controller_filter_base_addr_i = 20'd0;
     logic [15:0] controller_capture_limit_i = 16'd0;
     logic controller_pe_fire_o;
     rlc_vec_t controller_pe_ifmap_o;
@@ -154,10 +183,15 @@ module tb;
     int dec_nonzero_event_count;
     int dec_zero_event_count;
     int dec_last_event_count;
+    int dbg_controller_fire_count;
+    int dbg_acc_ppu_count;
+    int dbg_packer_count;
 
     top u_top (
         .clk(clk),
         .rst(rst),
+        .input_zero_vec_i(rlc_zero_vec(input_zero_lane)),
+        .output_zero_vec_i(rlc_zero_vec(output_zero_lane)),
 
         .input_token_data_i(dec_token_data_i),
         .input_token_valid_i(dec_token_valid_i),
@@ -184,6 +218,16 @@ module tb;
         .weight_sram_ready_o(weight_sram_ready_o),
         .weight_sram_raddr_i(weight_sram_raddr_i),
         .weight_sram_rdata_o(weight_sram_rdata_o),
+        .weight_preload_done_i(weight_preload_done_i),
+        .weight_preload_wen_i(weight_preload_wen_i),
+        .weight_preload_sram_sel_i(weight_preload_sram_sel_i),
+        .weight_preload_addr_i(weight_preload_addr_i),
+        .weight_preload_wdata_i(weight_preload_wdata_i),
+        .weight_preload_start_o(weight_preload_start_o),
+        .weight_compute_sram_sel_o(weight_compute_sram_sel_o),
+        .weight_preload_sram_sel_o(weight_preload_sram_sel_o),
+        .weight_current_m_o(weight_current_m_o), .weight_next_m_o(weight_next_m_o),
+        .weight_compute_done_o(weight_compute_done_o), .weight_swap_enable_o(weight_swap_enable_o),
 
         .ppu_data_i(enc_ppu_data_i),
         .ppu_valid_i(enc_ppu_valid_i),
@@ -196,6 +240,7 @@ module tb;
         .ppu_scalar_last_i(ppu_scalar_last_i),
         .ppu_scalar_ready_o(ppu_scalar_ready_o),
         .ppu_scaling_factor_i(ppu_scaling_factor_i),
+        .ppu_bias_i(ppu_bias_i),
         .ppu_relu_en_i(ppu_relu_en_i),
         .ppu_maxpool_en_i(ppu_maxpool_en_i),
         .ppu_maxpool_init_i(ppu_maxpool_init_i),
@@ -206,6 +251,9 @@ module tb;
         .pe_accum_ready_o(pe_accum_ready_o),
         .pe_mode_1x1_i(pe_mode_1x1_i),
         .pe_ifmap_data_i(pe_ifmap_data_i),
+        .pe_ifmap_1x1_data_0_i(pe_ifmap_1x1_data_0_i),
+        .pe_ifmap_1x1_data_1_i(pe_ifmap_1x1_data_1_i),
+        .pe_ifmap_1x1_data_2_i(pe_ifmap_1x1_data_2_i),
         .pe_weight_data_i(pe_weight_data_i),
         .pe_accum_last_i(pe_accum_last_i),
         .pe_accum_base_idx_i(pe_accum_base_idx_i),
@@ -218,6 +266,7 @@ module tb;
         .controller_pe_fire_o(controller_pe_fire_o),
         .controller_pe_ifmap_o(controller_pe_ifmap_o),
         .controller_pe_weight_o(controller_pe_weight_o),
+        .ppu_channel_o(ppu_channel_o),
 
         .output_token_data_o(enc_token_data_o),
         .output_token_valid_o(enc_token_valid_o),
@@ -229,6 +278,14 @@ module tb;
     );
 
     always #5 clk = ~clk;
+
+    always_comb begin
+        if (int'(ppu_channel_o) < bias_count) begin
+            ppu_bias_i = bias_values[int'(ppu_channel_o)];
+        end else begin
+            ppu_bias_i = '0;
+        end
+    end
 
     always @(posedge clk) begin
         if (!rst && enc_token_valid_o && enc_token_ready_i) begin
@@ -242,10 +299,12 @@ module tb;
 
     always @(posedge clk) begin
         if (!rst && dec_ctrl_valid_o && dec_ctrl_ready_i) begin
-            $display("[tb] input_RLC_decoder event[%0d]: run=%0d dense_index=%0d nonzero=%0b last=%0b sram_wen=%0b sram_waddr=%0d sram_wdata=0x%014h",
-                     dec_event_count, dec_ctrl_run_o, dec_ctrl_dense_index_o,
-                     dec_ctrl_vec_nonzero_o, dec_ctrl_last_o,
-                     dec_sram_wen_o, dec_sram_waddr_o, dec_sram_wdata_o);
+            if (!vwa_layer_mode || dec_event_count < 8 || dec_ctrl_last_o) begin
+                $display("[tb] input_RLC_decoder event[%0d]: run=%0d dense_index=%0d nonzero=%0b last=%0b sram_wen=%0b sram_waddr=%0d sram_wdata=0x%014h",
+                         dec_event_count, dec_ctrl_run_o, dec_ctrl_dense_index_o,
+                         dec_ctrl_vec_nonzero_o, dec_ctrl_last_o,
+                         dec_sram_wen_o, dec_sram_waddr_o, dec_sram_wdata_o);
+            end
             dec_event_count++;
             if (dec_ctrl_vec_nonzero_o) begin
                 dec_nonzero_event_count++;
@@ -259,9 +318,30 @@ module tb;
     end
 
     always @(posedge clk) begin
+        if (!rst && controller_pe_fire_o && dbg_controller_fire_count < 8) begin
+            if (u_top.controller_mode_1x1) begin
+                $display("[tb] Controller->PE fire[%0d]: g0=0x%014h g1=0x%014h g2=0x%014h weight=0x%06h psum0=%0d c=%0d m=%0d last_ch=%0b",
+                         dbg_controller_fire_count, u_top.controller_ifmap_pe_group_0,
+                         u_top.controller_ifmap_pe_group_1, u_top.controller_ifmap_pe_group_2,
+                         controller_pe_weight_o, $signed(u_top.pe_psum_out[0 +: 32]),
+                         u_top.controller_ifmap_ch_index, u_top.controller_ofmap_ch_index,
+                         u_top.controller_last_channel);
+            end else begin
+                $display("[tb] Controller->PE fire[%0d]: pe_ifmap=0x%014h pe_weight=0x%06h",
+                         dbg_controller_fire_count, controller_pe_ifmap_o, controller_pe_weight_o);
+            end
+        end
+    end
+
+    always @(posedge clk) begin
         if (!rst && controller_pe_fire_o) begin
-            $display("[tb] Controller->PE fire: pe_ifmap=0x%014h pe_weight=0x%06h",
-                     controller_pe_ifmap_o, controller_pe_weight_o);
+            dbg_controller_fire_count++;
+        end
+        if (!rst && u_top.acc_ppu_valid && u_top.acc_ppu_ready) begin
+            dbg_acc_ppu_count++;
+        end
+        if (!rst && u_top.packer_rlc_valid && u_top.packer_rlc_ready) begin
+            dbg_packer_count++;
         end
     end
 
@@ -272,6 +352,18 @@ module tb;
             $dumpvars(0, tb);
             $display("[tb] TRACE_FILE      = %s", trace_file);
         end
+`endif
+`ifdef FSDB
+        if (!$value$plusargs("FSDB_FILE=%s", trace_file)) begin
+            trace_file = "waves/rtl0.fsdb";
+        end
+        $fsdbDumpfile(trace_file);
+`ifdef FSDB_ALL
+        $fsdbDumpvars(0, tb, "+all");
+`else
+        $fsdbDumpvars(0, tb);
+`endif
+        $display("[tb] FSDB_FILE       = %s", trace_file);
 `endif
         pass = 1'b1;
         input_zero_lane = 8'd0;
@@ -284,7 +376,9 @@ module tb;
         full_hw_path = 1'b0;
         full_hw_packet_limit = 8;
         stream_hw_path = 1'b0;
+        vwa_layer_mode = 1'b0;
         stream_input_scalars = 490;
+        vwa_layer = 1;
 
         if ($value$plusargs("INPUT_ZERO_LANE=%d", input_zero_lane_arg)) begin
             check_zero_lane_arg("INPUT_ZERO_LANE", input_zero_lane_arg);
@@ -319,6 +413,12 @@ module tb;
         if ($value$plusargs("STREAM_HW_PATH=%d", stream_hw_path_arg)) begin
             stream_hw_path = stream_hw_path_arg != 0;
         end
+        if ($value$plusargs("VWA_LAYER_MODE=%d", vwa_layer_mode_arg)) begin
+            vwa_layer_mode = vwa_layer_mode_arg != 0;
+        end
+        if ($value$plusargs("VWA_LAYER=%d", vwa_layer_arg)) begin
+            vwa_layer = vwa_layer_arg;
+        end
         if ($value$plusargs("STREAM_INPUT_SCALARS=%d", stream_input_scalars_arg)) begin
             if (stream_input_scalars_arg <= 0 || stream_input_scalars_arg > MAX_VALUES) begin
                 $fatal(1, "[tb] STREAM_INPUT_SCALARS=%0d is outside 1..%0d",
@@ -341,21 +441,35 @@ module tb;
         if (!$value$plusargs("GOLDEN_FILE=%s", golden_file)) begin
             golden_file = "test_data/PE_test_data/tb0/ofmap_tb0.txt";
         end
+        if (!$value$plusargs("BIAS_FILE=%s", bias_file)) begin
+            bias_file = "";
+        end
+        if (!$value$plusargs("REQUANT_SHIFT_FILE=%s", requant_shift_file)) begin
+            requant_shift_file = "";
+        end
         if (!$value$plusargs("STREAM_HW_OUT_FILE=%s", stream_hw_out_file)) begin
             stream_hw_out_file = "waves/stream_hw_vectors.txt";
+        end
+        if (!$value$plusargs("FULL_HW_OUT_FILE=%s", full_hw_out_file)) begin
+            full_hw_out_file = "waves/full_path_hw_vectors.txt";
         end
 
         $display("[tb] IFMAP_FILE       = %s", ifmap_file);
         $display("[tb] WEIGHT_FILE      = %s", weight_file);
         $display("[tb] GOLDEN_FILE      = %s", golden_file);
+        if (bias_file != "") $display("[tb] BIAS_FILE        = %s", bias_file);
+        if (requant_shift_file != "") $display("[tb] REQUANT_SHIFT_FILE = %s", requant_shift_file);
         $display("[tb] INPUT_ZERO_LANE  = %0d", input_zero_lane);
         $display("[tb] WEIGHT_ZERO_LANE = %0d", weight_zero_lane);
         $display("[tb] OUTPUT_ZERO_LANE = %0d", output_zero_lane);
         $display("[tb] PROCESS_GOLDEN_PSUM = %0d", process_golden_psum);
         $display("[tb] FULL_HW_PATH   = %0d", full_hw_path);
         $display("[tb] STREAM_HW_PATH = %0d", stream_hw_path);
+        $display("[tb] VWA_LAYER_MODE = %0d", vwa_layer_mode);
+        $display("[tb] VWA_LAYER      = %0d", vwa_layer);
         if (full_hw_path) begin
             $display("[tb] FULL_HW_PACKET_LIMIT = %0d", full_hw_packet_limit);
+            $display("[tb] FULL_HW_OUT_FILE = %s", full_hw_out_file);
         end
         if (stream_hw_path) begin
             $display("[tb] STREAM_INPUT_SCALARS = %0d", stream_input_scalars);
@@ -369,6 +483,19 @@ module tb;
         load_csv_i32(ifmap_file, ifmap_values, ifmap_count);
         load_csv_i32(weight_file, weight_values, weight_count);
         load_csv_i32(golden_file, golden_values, golden_count);
+        bias_count = 0;
+        requant_shift_count = 0;
+        requant_shift = scaling_factor;
+        if (bias_file != "") begin
+            load_csv_i32(bias_file, bias_values, bias_count);
+        end
+        if (requant_shift_file != "") begin
+            load_csv_i32(requant_shift_file, requant_shift_values, requant_shift_count);
+            if (requant_shift_count != 1) begin
+                $fatal(1, "[tb] REQUANT_SHIFT_FILE must contain exactly one value");
+            end
+            requant_shift = requant_shift_values[0];
+        end
 
         pack_values_to_vecs("ifmap", ifmap_values, ifmap_count, input_zero_lane,
                             ifmap_vecs, ifmap_vec_count);
@@ -415,10 +542,14 @@ module tb;
         $display("[tb] golden token count  = %0d", golden_token_count);
         print_tokens("golden", golden_tokens, golden_token_count, 8);
 
-        if (stream_hw_path) begin
-            run_pe_accumulator_stream_hw_check(pass);
-        end else if (full_hw_path) begin
+        if (full_hw_path) begin
             run_full_controller_hw_path_check(pass);
+        end else if (vwa_layer_mode) begin
+            run_input_decoder_hw_check(pass);
+            run_output_encoder_hw_check(pass);
+            $display("[tb] VWA layer mode: skipped legacy PE/controller smoke checks");
+        end else if (stream_hw_path) begin
+            run_pe_accumulator_stream_hw_check(pass);
         end else begin
             run_input_decoder_hw_check(pass);
             run_output_encoder_hw_check(pass);
@@ -450,9 +581,9 @@ module tb;
         dec_ctrl_ready_i = 1'b1;
         dec_sram_raddr_i = 16'd0;
         weight_sram_wen_i = 1'b0;
-        weight_sram_waddr_i = 16'd0;
+        weight_sram_waddr_i = 20'd0;
         weight_sram_wdata_i = '0;
-        weight_sram_raddr_i = 16'd0;
+        weight_sram_raddr_i = 20'd0;
         enc_ppu_data_i = '0;
         enc_ppu_valid_i = 1'b0;
         enc_ppu_last_i = 1'b0;
@@ -469,13 +600,19 @@ module tb;
         pe_accum_valid_i = 1'b0;
         pe_mode_1x1_i = 1'b0;
         pe_ifmap_data_i = '0;
+        pe_ifmap_1x1_data_0_i = '0;
+        pe_ifmap_1x1_data_1_i = '0;
+        pe_ifmap_1x1_data_2_i = '0;
         pe_weight_data_i = '0;
         pe_accum_last_i = 1'b0;
         pe_accum_base_idx_i = 10'd0;
         output_use_controller_i = 1'b0;
         controller_config_i = '0;
+        dbg_controller_fire_count = 0;
+        dbg_acc_ppu_count = 0;
+        dbg_packer_count = 0;
         controller_ifmap_base_addr_i = 16'd0;
-        controller_filter_base_addr_i = 16'd0;
+        controller_filter_base_addr_i = 20'd0;
         controller_capture_limit_i = 16'd0;
         enc_token_ready_i = 1'b1;
         dec_event_count = 0;
@@ -497,7 +634,7 @@ module tb;
             @(posedge clk);
             #1;
             guard++;
-            if (guard > 1000) begin
+            if (guard > 20000) begin
                 $fatal(1, "[tb] timeout waiting for input_RLC_decoder.token_ready_o");
             end
         end
@@ -556,6 +693,11 @@ module tb;
         end
 
         pe_ifmap_data_i = ifmap_data;
+        // Preserve legacy one-vector PE tests.  New 1x1 tests may override
+        // these three signals with independently banked channel vectors.
+        pe_ifmap_1x1_data_0_i = ifmap_data;
+        pe_ifmap_1x1_data_1_i = ifmap_data;
+        pe_ifmap_1x1_data_2_i = ifmap_data;
         pe_weight_data_i = weight_data;
         pe_mode_1x1_i = mode_1x1;
         pe_accum_last_i = is_last;
@@ -567,6 +709,9 @@ module tb;
         pe_accum_last_i = 1'b0;
         pe_accum_base_idx_i = 10'd0;
         pe_ifmap_data_i = '0;
+        pe_ifmap_1x1_data_0_i = '0;
+        pe_ifmap_1x1_data_1_i = '0;
+        pe_ifmap_1x1_data_2_i = '0;
         pe_weight_data_i = '0;
     endtask
 
@@ -586,13 +731,13 @@ module tb;
             end
         end
 
-        weight_sram_waddr_i = 16'(beat_idx);
+        weight_sram_waddr_i = 20'(beat_idx);
         weight_sram_wdata_i = beat;
         weight_sram_wen_i = 1'b1;
         @(posedge clk);
         #1;
         weight_sram_wen_i = 1'b0;
-        weight_sram_waddr_i = 16'd0;
+        weight_sram_waddr_i = 20'd0;
         weight_sram_wdata_i = '0;
     endtask
 
@@ -645,10 +790,19 @@ module tb;
             @(posedge clk);
             #1;
             guard++;
-            if (guard > 10000) begin
+            if (guard > 400000000) begin
                 ok = 1'b0;
-                $display("[tb] %s timeout waiting for output encoder terminal token: got_tokens=%0d",
-                         label, hw_golden_token_count);
+                $display("[tb] %s timeout waiting for output encoder terminal token: got_tokens=%0d controller_fires=%0d acc_ppu=%0d packer_vecs=%0d",
+                         label, hw_golden_token_count, dbg_controller_fire_count, dbg_acc_ppu_count, dbg_packer_count);
+                $display("[tb] Controller debug: state=%0d ifmap_ready=%03b ifmap_in_valid=%03b filter_ready=%0b filter_in_valid=%0b filter_valid=%0b ifmap_valid=%03b acc_ready=%0b issue_inflight=%0b",
+                         u_top.u_controller.curr, u_top.controller_ifmap_ready, u_top.controller_ifmap_in_valid,
+                         u_top.controller_filter_ready, u_top.controller_filter_in_valid, u_top.controller_filter_valid,
+                         u_top.controller_ifmap_valid, u_top.acc_in_ready, u_top.controller_issue_inflight);
+                $display("[tb] Controller debug idx: m=%0d c=%0d e=%0d w=%0d load_col=%0d ifmap_addr=%0d filter_addr=%0d",
+                         u_top.controller_ofmap_ch_index, u_top.controller_ifmap_ch_index,
+                         u_top.controller_ofmap_row_index, u_top.controller_ifmap_col_index,
+                         u_top.controller_filter_load_index, u_top.controller_ifmap_calc_raddr,
+                         u_top.controller_filter_calc_raddr);
                 return;
             end
         end
@@ -661,11 +815,11 @@ module tb;
 
         reset_hw_units();
 
-        if (ifmap_vec_count > 256) begin
-            $fatal(1, "[tb] input_sram_reg only stores 256 vectors, got %0d", ifmap_vec_count);
+        if (ifmap_vec_count > 65536) begin
+            $fatal(1, "[tb] input_sram_reg only stores 65536 vectors, got %0d", ifmap_vec_count);
         end
-        if (weight_filter_beat_count > 256) begin
-            $fatal(1, "[tb] weight_sram_reg only stores 256 filter beats, got %0d", weight_filter_beat_count);
+        if (weight_filter_beat_count > 1048576) begin
+            $fatal(1, "[tb] weight_sram_reg only stores 1048576 filter beats, got %0d", weight_filter_beat_count);
         end
 
         load_weight_sram_hw();
@@ -726,23 +880,45 @@ module tb;
     task automatic check_input_sram_hw(ref bit ok);
         int vec_idx;
         int mismatch_prints;
+        int check_count3;
+        int group_addr;
+        rlc_vec_t got_vec;
 
         mismatch_prints = 0;
+        check_count3 = 0;
+        group_addr = 0;
         for (vec_idx = 0; vec_idx < ifmap_vec_count; vec_idx++) begin
-            dec_sram_raddr_i = 16'(vec_idx);
+            dec_sram_raddr_i = 16'(group_addr);
+            @(posedge clk);
             #1;
-            if (dec_sram_rdata_o !== ifmap_vecs[vec_idx]) begin
+            @(posedge clk);
+            #1;
+
+            unique case (check_count3)
+                0: got_vec = u_top.input_sram_1x1_rdata_0;
+                1: got_vec = u_top.input_sram_1x1_rdata_1;
+                default: got_vec = u_top.input_sram_1x1_rdata_2;
+            endcase
+
+            if (got_vec !== ifmap_vecs[vec_idx]) begin
                 ok = 1'b0;
                 if (mismatch_prints < 8) begin
-                    $display("[tb] input_RLC_decoder SRAM vec[%0d] mismatch: got=0x%014h expected=0x%014h",
-                             vec_idx, dec_sram_rdata_o, ifmap_vecs[vec_idx]);
+                    $display("[tb] input SRAM banked vec[%0d] mismatch: bank=%0d addr=%0d got=0x%014h expected=0x%014h",
+                             vec_idx, check_count3, group_addr, got_vec, ifmap_vecs[vec_idx]);
                     mismatch_prints++;
                 end
+            end
+
+            if (check_count3 == 2) begin
+                check_count3 = 0;
+                group_addr++;
+            end else begin
+                check_count3++;
             end
         end
 
         if (mismatch_prints == 0) begin
-            $display("[tb] input_RLC_decoder hw pass: %0d token(s) decoded into %0d SRAM vector(s)",
+            $display("[tb] input_RLC_decoder hw pass: %0d token(s) decoded into %0d full 56-bit SRAM vector(s) across 3 banks",
                      ifmap_token_count, ifmap_vec_count);
         end
     endtask
@@ -761,7 +937,8 @@ module tb;
 
         mismatch_prints = 0;
         for (beat_idx = 0; beat_idx < weight_filter_beat_count; beat_idx++) begin
-            weight_sram_raddr_i = 16'(beat_idx);
+            weight_sram_raddr_i = 20'(beat_idx);
+            @(posedge clk);
             #1;
             if (weight_sram_rdata_o !== weight_filter_beats[beat_idx]) begin
                 ok = 1'b0;
@@ -833,11 +1010,11 @@ module tb;
 
         reset_hw_units();
 
-        if (ifmap_vec_count > 256) begin
-            $fatal(1, "[tb] input_sram_reg only stores 256 vectors, got %0d", ifmap_vec_count);
+        if (ifmap_vec_count > 65536) begin
+            $fatal(1, "[tb] input_sram_reg only stores 65536 vectors, got %0d", ifmap_vec_count);
         end
-        if (weight_filter_beat_count > 256) begin
-            $fatal(1, "[tb] weight_sram_reg only stores 256 filter beats, got %0d", weight_filter_beat_count);
+        if (weight_filter_beat_count > 1048576) begin
+            $fatal(1, "[tb] weight_sram_reg only stores 1048576 filter beats, got %0d", weight_filter_beat_count);
         end
 
         load_weight_sram_hw();
@@ -853,7 +1030,7 @@ module tb;
         hw_golden_token_count = 0;
         controller_config_i = {2'b00, 9'd1, 9'd1, 5'd0, 5'd0};
         controller_ifmap_base_addr_i = 16'd0;
-        controller_filter_base_addr_i = 16'(selected_weight_beat);
+        controller_filter_base_addr_i = 20'(selected_weight_beat);
         controller_capture_limit_i = 16'd1;
         output_use_hw_ppu_i = 1'b0;
         ppu_scaling_factor_i = scaling_factor[5:0];
@@ -878,21 +1055,86 @@ module tb;
         output_use_controller_i = 1'b0;
     endtask
 
+
+    task automatic get_vwa_layer_shape(
+        input int layer,
+        output bit is_1x1,
+        output int c_cfg,
+        output int m,
+        output int e,
+        output int f
+    );
+        begin
+            is_1x1 = 1'b0;
+            c_cfg = 0;
+            m = 0;
+            e = 0;
+            f = 0;
+            unique case (layer)
+                1: begin is_1x1 = 1'b0; c_cfg = 3;   m = 64;  e = 32; f = 32; end
+                2: begin is_1x1 = 1'b0; c_cfg = 64;  m = 192; e = 16; f = 16; end
+                3: begin is_1x1 = 1'b0; c_cfg = 192; m = 384; e = 8;  f = 8;  end
+                4: begin is_1x1 = 1'b0; c_cfg = 384; m = 256; e = 8;  f = 8;  end
+                5: begin is_1x1 = 1'b0; c_cfg = 256; m = 256; e = 8;  f = 8;  end
+                7: begin is_1x1 = 1'b1; c_cfg = (256 + 2) / 3; m = 128; e = 1; f = 1; end
+                8: begin is_1x1 = 1'b1; c_cfg = (128 + 2) / 3; m = 10;  e = 1; f = 1; end
+                default: $fatal(1, "[tb] unsupported VWA_LAYER=%0d", layer);
+            endcase
+        end
+    endtask
+
+    task automatic load_pingpong_channel(input int channel, input int beats, input bit bank);
+        int local_idx;
+        begin
+            for (local_idx = 0; local_idx < beats; local_idx++) begin
+                weight_preload_sram_sel_i = bank;
+                weight_preload_addr_i = local_idx[10:0];
+                weight_preload_wdata_i = weight_filter_beats[channel * beats + local_idx];
+                weight_preload_wen_i = 1'b1;
+                @(posedge clk); #1;
+                weight_preload_wen_i = 1'b0;
+            end
+        end
+    endtask
+
+    task automatic pingpong_preload_worker(input int total_m, input int beats);
+        int m;
+        begin
+            for (m = 1; m < total_m; m++) begin
+                wait (weight_preload_start_o && weight_current_m_o == 9'(m - 1));
+                load_pingpong_channel(m, beats, weight_preload_sram_sel_o);
+                weight_preload_done_i = 1'b1;
+                wait (weight_current_m_o == 9'(m));
+                weight_preload_done_i = 1'b0;
+            end
+        end
+    endtask
+
     task automatic run_full_controller_hw_path_check(ref bit ok);
-        int selected_weight_beat;
         int token_idx;
-        int expected_scalar_count;
+        bit layer_is_1x1;
+        int layer_c_cfg;
+        int layer_m;
+        int layer_e;
+        int layer_f;
+        int channel_beats;
+        int preload_m;
 
         reset_hw_units();
 
-        if (ifmap_vec_count > 256) begin
-            $fatal(1, "[tb] input_sram_reg only stores 256 vectors, got %0d", ifmap_vec_count);
+        if (ifmap_vec_count > 65536) begin
+            $fatal(1, "[tb] input_sram_reg only stores 65536 vectors, got %0d", ifmap_vec_count);
         end
-        if (weight_filter_beat_count > 256) begin
-            $fatal(1, "[tb] weight_sram_reg only stores 256 filter beats, got %0d", weight_filter_beat_count);
+        if (weight_filter_beat_count > 1048576) begin
+            $fatal(1, "[tb] weight_sram_reg only stores 1048576 filter beats, got %0d", weight_filter_beat_count);
         end
 
-        load_weight_sram_hw();
+        get_vwa_layer_shape(vwa_layer, layer_is_1x1, layer_c_cfg, layer_m, layer_e, layer_f);
+        controller_config_i = {1'b0, layer_is_1x1, 9'(layer_c_cfg), 9'(layer_m),
+                               5'(layer_e - 1), 5'(layer_f - 1)};
+        channel_beats = layer_is_1x1 ? layer_c_cfg : layer_c_cfg * 3;
+        load_pingpong_channel(0, channel_beats, 1'b0);
+        weight_preload_done_i = 1'b0;
         for (token_idx = 0; token_idx < ifmap_token_count; token_idx++) begin
             send_input_decoder_token(ifmap_tokens[token_idx]);
         end
@@ -901,19 +1143,15 @@ module tb;
         #1;
         check_input_decoder_events(ok);
         check_input_sram_hw(ok);
-        check_weight_sram_hw(ok);
-
-        selected_weight_beat = first_nonzero_weight_beat();
-        expected_scalar_count = full_hw_packet_limit * 9;
-        build_golden_prefix_expected(expected_scalar_count);
 
         hw_golden_token_count = 0;
-        controller_config_i = {2'b00, 9'd1, 9'd1, 5'd0, 5'd0};
+        controller_config_i = {1'b0, layer_is_1x1, 9'(layer_c_cfg), 9'(layer_m),
+                               5'(layer_e - 1), 5'(layer_f - 1)};
         controller_ifmap_base_addr_i = 16'd0;
-        controller_filter_base_addr_i = 16'(selected_weight_beat);
-        controller_capture_limit_i = 16'(full_hw_packet_limit);
+        controller_filter_base_addr_i = 20'd0;
+        controller_capture_limit_i = 16'd0;
         output_use_hw_ppu_i = 1'b0;
-        ppu_scaling_factor_i = scaling_factor[5:0];
+        ppu_scaling_factor_i = requant_shift[5:0];
         ppu_relu_en_i = relu_en;
         ppu_maxpool_en_i = 1'b0;
         ppu_maxpool_init_i = 1'b0;
@@ -921,9 +1159,12 @@ module tb;
         @(posedge clk);
         #1;
 
-        $display("[tb] FULL PATH start: packets=%0d expected_scalars=%0d filter_base=%0d config=0x%08h",
-                 full_hw_packet_limit, expected_scalar_count, selected_weight_beat, controller_config_i);
+        $display("[tb] FULL PATH start: layer=%0d mode_1x1=%0d C_cfg=%0d M=%0d E=%0d F=%0d config=0x%08h",
+                 vwa_layer, layer_is_1x1, layer_c_cfg, layer_m, layer_e, layer_f, controller_config_i);
         output_use_controller_i = 1'b1;
+        fork
+            pingpong_preload_worker(layer_m, channel_beats);
+        join_none
         wait_output_encoder_done(ok, "FULL PATH");
 
         $display("[tb] FULL PATH output token count = %0d", hw_golden_token_count);
@@ -931,8 +1172,10 @@ module tb;
         decompress_tokens("full_path_hw", hw_golden_tokens, hw_golden_token_count,
                           rlc_zero_vec(output_zero_lane),
                           hw_output_roundtrip, hw_output_roundtrip_count);
-        ok &= compare_vecs("FULL PATH decoded output vs golden prefix",
-                           pe_hw_expected_vecs, pe_hw_expected_vec_count,
+        write_vecs_to_file(full_hw_out_file,
+                           hw_output_roundtrip, hw_output_roundtrip_count);
+        ok &= compare_vecs("FULL PATH decoded output vs layer golden",
+                           golden_vecs, golden_vec_count,
                            hw_output_roundtrip, hw_output_roundtrip_count);
 
         output_use_controller_i = 1'b0;
@@ -963,14 +1206,13 @@ module tb;
             $fatal(1, "[tb] stream test needs %0d vectors but only has %0d",
                    stream_vec_count, ifmap_vec_count);
         end
-        if (stream_vec_count > 256) begin
-            $fatal(1, "[tb] input_sram_reg only stores 256 vectors, got %0d", stream_vec_count);
+        if (stream_vec_count > 65536) begin
+            $fatal(1, "[tb] input_sram_reg only stores 65536 vectors, got %0d", stream_vec_count);
         end
-        if (weight_filter_beat_count > 256) begin
-            $fatal(1, "[tb] weight_sram_reg only stores 256 filter beats, got %0d", weight_filter_beat_count);
+        if (weight_filter_beat_count > 1048576) begin
+            $fatal(1, "[tb] weight_sram_reg only stores 1048576 filter beats, got %0d", weight_filter_beat_count);
         end
 
-        load_weight_sram_hw();
         for (token_idx = 0; token_idx < ifmap_token_count; token_idx++) begin
             send_input_decoder_token(ifmap_tokens[token_idx]);
         end
@@ -983,7 +1225,7 @@ module tb;
 
         build_pe_accumulator_stream_expected(stream_vec_count, stream_weight, selected_weight_beat);
 
-        weight_sram_raddr_i = 16'(selected_weight_beat);
+        weight_sram_raddr_i = 20'(selected_weight_beat);
         #1;
         if (weight_sram_rdata_o !== stream_weight) begin
             ok = 1'b0;
@@ -1280,7 +1522,7 @@ module tb;
         input rlc_vec_t vec,
         input int lane
     );
-        return vec[(RLC_LANES - 1 - lane) * RLC_LANE_BITS +: RLC_LANE_BITS];
+        return vec[lane * RLC_LANE_BITS +: RLC_LANE_BITS];
     endfunction
 
     function automatic logic [7:0] qint8_to_pe_signed(input logic [7:0] value);
@@ -1442,7 +1684,7 @@ module tb;
                 end else begin
                     lane_value = pad_lane;
                 end
-                vecs[vec_idx][(RLC_LANES - 1 - lane) * RLC_LANE_BITS +: RLC_LANE_BITS] = lane_value;
+                vecs[vec_idx][lane * RLC_LANE_BITS +: RLC_LANE_BITS] = lane_value;
             end
         end
     endtask
@@ -1519,13 +1761,16 @@ module tb;
             if (is_zero) begin
                 if (is_last_vec) begin
                     if (run == RLC_MAX_RUN) begin
+                        $display("[tb] WARNING: %s RLC RUN overflow at final dense vector idx=%0d; splitting packet", label, idx);
                         emit_token(label, tokens, token_count, 1'b0, RLC_MAX_RUN, zero_payload);
                         emit_token(label, tokens, token_count, 1'b1, 1, zero_payload);
                     end else begin
+                        $display("[tb] WARNING: %s ends with only-run terminate packet run=%0d", label, run + 1);
                         emit_token(label, tokens, token_count, 1'b1, run + 1, zero_payload);
                     end
                     run = 0;
                 end else if (run == RLC_MAX_RUN) begin
+                    $display("[tb] WARNING: %s RLC RUN overflow before dense vector idx=%0d; splitting packet", label, idx);
                     emit_token(label, tokens, token_count, 1'b0, RLC_MAX_RUN, zero_payload);
                     run = 1;
                 end else begin

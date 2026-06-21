@@ -48,6 +48,7 @@ module accumulator #(
     input  logic                                      ppu_ready,
     output logic signed [DATA_W-1:0]                  ppu_data,
     output logic        [IDX_W-1:0]                   ppu_idx,
+    output logic        [M_W-1:0]                     ppu_channel_m,
     output logic                                      ppu_last
 );
 
@@ -117,6 +118,7 @@ module accumulator #(
     endgenerate
 
     logic [1:0] mode_stage0;
+    logic [M_W-1:0] output_channel_stage0;
     logic       first_channel_stage0;
     logic       last_channel_stage0;
 
@@ -133,6 +135,7 @@ module accumulator #(
     boundary_addr_type boundary_addr_stage1;
 
     logic [1:0] mode_stage1;
+    logic [M_W-1:0] output_channel_stage1;
     logic       first_channel_stage1;
     logic       last_channel_stage1;
 
@@ -149,6 +152,7 @@ module accumulator #(
     boundary_addr_type boundary_addr_stage2;
 
     logic [1:0] mode_stage2;
+    logic [M_W-1:0] output_channel_stage2;
     logic       first_channel_stage2;
     logic       last_channel_stage2;
 
@@ -161,6 +165,7 @@ module accumulator #(
     logic     valid_ppu_hold;
     idx_type  idx_ppu_hold;
     logic     last_ppu_hold;
+    logic [M_W-1:0] channel_ppu_hold;
 
     // ============================================================
     // Packet FSM and lane control
@@ -177,6 +182,28 @@ module accumulator #(
     localparam logic [LANE_PTR_W-1:0] LAST_LANE_LP = LANE_PTR_W'(NUM_LANES - 1);
 
     logic [LANE_PTR_W-1:0] lane_ptr;
+    logic                  single_valid_packet;
+
+    // DC does not support $onehot() for synthesis, so implement the
+    // same check with synthesizable combinational logic.
+    logic                  pe_valid_onehot;
+    logic [LANE_PTR_W-1:0] pe_valid_lane_idx;
+    logic [LANE_PTR_W-1:0] pe_valid_count;
+    integer                lane_enc_i;
+
+    always_comb begin
+        pe_valid_count    = '0;
+        pe_valid_lane_idx = '0;
+
+        for (lane_enc_i = 0; lane_enc_i < NUM_LANES; lane_enc_i = lane_enc_i + 1) begin
+            if (pe_valid[lane_enc_i]) begin
+                pe_valid_count    = pe_valid_count + LANE_PTR_W'(1);
+                pe_valid_lane_idx = LANE_PTR_W'(lane_enc_i);
+            end
+        end
+
+        pe_valid_onehot = (pe_valid_count == LANE_PTR_W'(1));
+    end
 
     // ============================================================
     // Boundary read state and pending registers
@@ -196,6 +223,7 @@ module accumulator #(
     idx_type           boundary_idx_pending;
     boundary_addr_type boundary_addr_pending;
     logic              boundary_last_pending;
+    logic [M_W-1:0]    boundary_channel_pending;
 
     // ============================================================
     // Global flow control
@@ -283,7 +311,7 @@ module accumulator #(
 
     assign boundary_rf_clear_addr = boundary_addr_pending;
 
-    boundary_regfile #(
+    boundary_sram_wrapper #(
         .DATA_W (DATA_W),
         .ADDR_W (BOUNDARY_ADDR_W),
         .DEPTH  (BOUNDARY_DEPTH)
@@ -307,29 +335,40 @@ module accumulator #(
     // ============================================================
     always_ff @(posedge clk or posedge rst) begin
         if (rst) begin
-            state    <= S_IDLE;
-            lane_ptr <= '0;
+            state               <= S_IDLE;
+            lane_ptr            <= '0;
+            single_valid_packet <= 1'b0;
         end else if (!pipeline_stall) begin
             case (state)
                 S_IDLE: begin
-                    lane_ptr <= '0;
+                    lane_ptr            <= '0;
+                    single_valid_packet <= 1'b0;
                     if (in_valid && in_ready) begin
+                        // Controller packets contain one valid PE result.  Start
+                        // directly on that lane instead of idling through eight
+                        // invalid lanes; preserve the normal path for multi-lane packets.
+                        if (pe_valid_onehot) begin
+                            single_valid_packet <= 1'b1;
+                            lane_ptr <= pe_valid_lane_idx;
+                        end
                         state <= S_PROC;
                     end
                 end
 
                 S_PROC: begin
-                    if (lane_ptr == LAST_LANE_LP) begin
-                        state    <= S_IDLE;
-                        lane_ptr <= '0;
+                    if (single_valid_packet || lane_ptr == LAST_LANE_LP) begin
+                        state               <= S_IDLE;
+                        lane_ptr            <= '0;
+                        single_valid_packet <= 1'b0;
                     end else begin
                         lane_ptr <= lane_ptr + 1'b1;
                     end
                 end
 
                 default: begin
-                    state    <= S_IDLE;
-                    lane_ptr <= '0;
+                    state               <= S_IDLE;
+                    lane_ptr            <= '0;
+                    single_valid_packet <= 1'b0;
                 end
             endcase
         end
@@ -341,6 +380,7 @@ module accumulator #(
     always_ff @(posedge clk or posedge rst) begin
         if (rst) begin
             mode_stage0          <= MODE_3X3;
+            output_channel_stage0 <= '0;
             first_channel_stage0 <= 1'b0;
             last_channel_stage0  <= 1'b0;
 
@@ -368,6 +408,7 @@ module accumulator #(
                 end
 
                 mode_stage0          <= mode;
+                output_channel_stage0 <= output_channel_m;
                 first_channel_stage0 <= first_channel;
                 last_channel_stage0  <= last_channel;
             end
@@ -389,6 +430,7 @@ module accumulator #(
             boundary_addr_stage1 <= '0;
 
             mode_stage1          <= MODE_3X3;
+            output_channel_stage1 <= '0;
             first_channel_stage1 <= 1'b0;
             last_channel_stage1  <= 1'b0;
         end else if (!pipeline_stall) begin
@@ -405,6 +447,7 @@ module accumulator #(
                 boundary_addr_stage1 <= boundary_addr_stage0[lane_ptr];
 
                 mode_stage1          <= mode_stage0;
+                output_channel_stage1 <= output_channel_stage0;
                 first_channel_stage1 <= first_channel_stage0;
                 last_channel_stage1  <= last_channel_stage0;
             end
@@ -424,6 +467,7 @@ module accumulator #(
             boundary_addr_stage2 <= '0;
 
             mode_stage2          <= MODE_3X3;
+            output_channel_stage2 <= '0;
             first_channel_stage2 <= 1'b0;
             last_channel_stage2  <= 1'b0;
         end else if (!pipeline_stall) begin
@@ -440,6 +484,7 @@ module accumulator #(
                     boundary_addr_stage2 <= boundary_addr_stage1;
 
                     mode_stage2          <= mode_stage1;
+                    output_channel_stage2 <= output_channel_stage1;
                     first_channel_stage2 <= first_channel_stage1;
                     last_channel_stage2  <= last_channel_stage1;
                 end else begin
@@ -453,6 +498,7 @@ module accumulator #(
                         boundary_addr_stage2 <= boundary_addr_stage1;
 
                         mode_stage2          <= mode_stage1;
+                        output_channel_stage2 <= output_channel_stage1;
                         first_channel_stage2 <= first_channel_stage1;
                         last_channel_stage2  <= last_channel_stage1;
                     end else if (first_col_stage1) begin
@@ -466,6 +512,7 @@ module accumulator #(
                         boundary_addr_stage2 <= boundary_addr_stage1;
 
                         mode_stage2          <= mode_stage1;
+                        output_channel_stage2 <= output_channel_stage1;
                         first_channel_stage2 <= first_channel_stage1;
                         last_channel_stage2  <= last_channel_stage1;
                     end else begin
@@ -486,6 +533,7 @@ module accumulator #(
             valid_ppu_hold         <= 1'b0;
             idx_ppu_hold           <= '0;
             last_ppu_hold          <= 1'b0;
+            channel_ppu_hold       <= '0;
 
             boundary_state         <= B_IDLE;
             boundary_psum_pending  <= '0;
@@ -493,6 +541,7 @@ module accumulator #(
             boundary_idx_pending   <= '0;
             boundary_addr_pending  <= '0;
             boundary_last_pending  <= 1'b0;
+            boundary_channel_pending <= '0;
         end else begin
             // Remove an output only after a valid/ready handshake.
             // A new output may replace it in the same cycle.
@@ -511,12 +560,14 @@ module accumulator #(
                                 boundary_idx_pending  <= idx_stage2;
                                 boundary_addr_pending <= boundary_addr_stage2;
                                 boundary_last_pending <= last_stage2;
+                                boundary_channel_pending <= output_channel_stage2;
                                 boundary_state        <= B_WAIT_READ;
                             end else begin
                                 // Normal final output; no boundary merge needed.
                                 data_ppu_hold  <= tile_local_psum;
                                 idx_ppu_hold   <= idx_stage2;
                                 last_ppu_hold  <= last_stage2;
+                                channel_ppu_hold <= output_channel_stage2;
                                 valid_ppu_hold <= 1'b1;
                             end
                         end else if (first_channel_stage2) begin
@@ -543,6 +594,7 @@ module accumulator #(
                                             + boundary_psum_pending;
                             idx_ppu_hold   <= boundary_idx_pending;
                             last_ppu_hold  <= boundary_last_pending;
+                            channel_ppu_hold <= boundary_channel_pending;
                             valid_ppu_hold <= 1'b1;
                             boundary_state <= B_IDLE;
                         end else begin
@@ -560,6 +612,7 @@ module accumulator #(
                         data_ppu_hold  <= boundary_merged_pending;
                         idx_ppu_hold   <= boundary_idx_pending;
                         last_ppu_hold  <= boundary_last_pending;
+                        channel_ppu_hold <= boundary_channel_pending;
                         valid_ppu_hold <= 1'b1;
                         boundary_state <= B_IDLE;
                     end
@@ -574,7 +627,8 @@ module accumulator #(
 
     assign ppu_valid = valid_ppu_hold;
     assign ppu_data  = data_ppu_hold;
-    assign ppu_idx   = idx_ppu_hold;
-    assign ppu_last  = last_ppu_hold;
+    assign ppu_idx       = idx_ppu_hold;
+    assign ppu_channel_m = channel_ppu_hold;
+    assign ppu_last      = last_ppu_hold;
 
 endmodule

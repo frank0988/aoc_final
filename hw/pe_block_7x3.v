@@ -196,14 +196,20 @@ endmodule
 // -----------------------------------------------------------------------------
 // pe_block_7x3
 // -----------------------------------------------------------------------------
-// One-bank 7x3 PE block.
+// One-bank 7x3 PE block (3-channel capable).
 //
 // Shared input interface:
-//   ifmap_data  = 7 x 8-bit => [a0 ... a6]
+//   ifmap_data  = 3 banks x 7 rows x 8-bit, bank-major:
+//                 { bank2[0..6], bank1[0..6], bank0[0..6] }
+//                 bank c, row g  =>  index (c*PE_ROWS + g)
+//                 (bank0 region == the old 7-lane ifmap_data, so 3x3 is unchanged)
 //   weight_data = 3 x 8-bit => [w0 w1 w2]
+//                 3x3 mode : 3 kernel-column weights
+//                 1x1 mode : 3 channel weights (w_ch0, w_ch1, w_ch2)
 //
-// Internal simplification used by this project:
-//   each row reuses the same scalar across its 3 columns
+// Per-row input mapping:
+//   3x3 mode (mode_1x1=0): bank0 broadcast to all 3 columns -> {a,a,a}
+//   1x1 mode (mode_1x1=1): col0<-ch0, col1<-ch1, col2<-ch2 (three banks)
 // -----------------------------------------------------------------------------
 module pe_block_7x3 #(
     parameter integer DATA_W   = 8,
@@ -216,7 +222,7 @@ module pe_block_7x3 #(
     input  wire                                  clk,
     input  wire                                  rst_n,
     input  wire                                  mode_1x1,
-    input  wire signed [PE_ROWS*DATA_W-1:0]      ifmap_data,
+    input  wire signed [PE_COLS*PE_ROWS*DATA_W-1:0] ifmap_data,
     input  wire signed [PE_COLS*WEIGHT_W-1:0]    weight_data,
     output wire                                  all_zero_ifmap,
     output wire                                  all_zero_weight,
@@ -243,12 +249,17 @@ module pe_block_7x3 #(
     genvar g;
 
     assign zero_acc = {ACC_W{1'b0}};
-    assign all_zero_ifmap = (ifmap_data == {PE_ROWS*DATA_W{1'b0}});
+    // 3x3 mode only uses bank0; 1x1 mode uses all three banks.
+    assign all_zero_ifmap = mode_1x1
+        ? (ifmap_data == {PE_COLS*PE_ROWS*DATA_W{1'b0}})
+        : (ifmap_data[0*PE_ROWS*DATA_W +: PE_ROWS*DATA_W] == {PE_ROWS*DATA_W{1'b0}});
     assign all_zero_weight = (weight_data == {PE_COLS*WEIGHT_W{1'b0}});
 
     generate
         for (g = 0; g < PE_ROWS; g = g + 1) begin : g_row
-            wire signed [DATA_W-1:0]     ifmap_elem;
+            wire signed [DATA_W-1:0]     ifmap_ch0;
+            wire signed [DATA_W-1:0]     ifmap_ch1;
+            wire signed [DATA_W-1:0]     ifmap_ch2;
             wire signed [3*DATA_W-1:0]   act_row;
             wire signed [ACC_W-1:0]      diag_in_col1;
             wire signed [ACC_W-1:0]      diag_in_col2;
@@ -257,8 +268,16 @@ module pe_block_7x3 #(
             wire signed [3*ACC_W-1:0]    col_psums;
             wire signed [ACC_W-1:0]      row_sum;
 
-            assign ifmap_elem = ifmap_data[g*DATA_W +: DATA_W];
-            assign act_row    = {ifmap_elem, ifmap_elem, ifmap_elem};
+            // Bank-major: bank c, row g => index (c*PE_ROWS + g)
+            assign ifmap_ch0 = ifmap_data[((0*PE_ROWS)+g)*DATA_W +: DATA_W];
+            assign ifmap_ch1 = ifmap_data[((1*PE_ROWS)+g)*DATA_W +: DATA_W];
+            assign ifmap_ch2 = ifmap_data[((2*PE_ROWS)+g)*DATA_W +: DATA_W];
+
+            // a0->col0, a1->col1, a2->col2
+            //   1x1 mode: col0<-ch0, col1<-ch1, col2<-ch2
+            //   3x3 mode: bank0 broadcast to all 3 columns
+            assign act_row = mode_1x1 ? {ifmap_ch2, ifmap_ch1, ifmap_ch0}
+                                      : {ifmap_ch0, ifmap_ch0, ifmap_ch0};
 
             if (g == 0) begin : g_first_row
                 assign diag_in_col1 = zero_acc;

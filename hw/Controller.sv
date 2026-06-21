@@ -19,6 +19,7 @@ module Controller(
     input  logic ipsum_ready, //no use
     input  logic load_ready,
     input  logic opsum_valid, //no use
+    input  logic preload_done,
 
     output logic [2:0] ifmap_valid,
     output logic filter_valid,
@@ -43,6 +44,9 @@ module Controller(
     output logic [7:0] ifmap_pe_4,
     output logic [7:0] ifmap_pe_5,
     output logic [7:0] ifmap_pe_6,
+    output logic [55:0] ifmap_pe_group_0,
+    output logic [55:0] ifmap_pe_group_1,
+    output logic [55:0] ifmap_pe_group_2,
     output logic [7:0] filter_pe_0,
     output logic [7:0] filter_pe_1,
     output logic [7:0] filter_pe_2,
@@ -52,7 +56,18 @@ module Controller(
     output logic first_channel,
     output logic last_channel,
     output logic boundary_final,
-    output logic pe_last
+    output logic pe_last,
+    output logic layer_done,
+    output logic [8:0] ofmap_ch_index,
+    output logic [5:0] ifmap_col_index,
+    output logic [1:0] filter_load_index,
+    output logic compute_sram_sel,
+    output logic preload_sram_sel,
+    output logic preload_start,
+    output logic compute_done,
+    output logic swap_enable,
+    output logic [8:0] current_m,
+    output logic [8:0] next_m
 );
 
 localparam logic [3:0] IDLE        = 4'd0;
@@ -65,9 +80,15 @@ localparam logic [3:0] COMPUTE_S3  = 4'd6;
 localparam logic [3:0] COMPUTE_S4  = 4'd7;
 localparam logic [3:0] COMPUTE_S5  = 4'd8;
 localparam logic [3:0] COMPUTE_1X1 = 4'd9;
+localparam logic [3:0] WAIT_PRELOAD = 4'd10;
+localparam logic [3:0] SWAP_SRAM   = 4'd11;
 localparam logic [3:0] DONE        = 4'd15;
 
 logic [3:0] curr, next;
+logic compute_sram_sel_r;
+logic preload_sram_sel_r;
+logic channel_compute_done;
+logic last_channel_compute;
 
 logic [1:0] mode;
 logic [8:0] cfg_c;
@@ -85,15 +106,30 @@ logic [1:0] load_filter_cnt;
 logic [1:0] state_ifmap_cnt;
 logic load_filter_done;
 logic [2:0] ifmap_stream_sel;
+logic [2:0] ifmap_col_bank_sel;
 
 logic [2:0] ifmap_valid_r;
 logic filter_valid_r;
 logic [4:0] ofmap_col_index_r;
 logic [2:0] filter_col_index_r;
+logic [8:0] ifmap_ch_index_r;
+logic [4:0] ofmap_row_index_r;
+logic [8:0] ofmap_ch_index_r;
+logic [5:0] ifmap_col_index_r;
+logic first_col_r;
+logic last_col_r;
+logic first_channel_r;
+logic last_channel_r;
+logic boundary_final_r;
+logic boundary_en_r;
+logic pe_last_r;
+logic layer_done_r;
 logic [4:0] next_ofmap_col_index;
 logic [2:0] count7;
 logic [2:0] next_count7;
-logic [7:0] ifmap_pe_r [0:6];
+// Three independently fetched 7-lane operands for the 1x1 channel group.
+// 3x3 continues to use bank 0 only.
+logic [7:0] ifmap_pe_r [0:2][0:6];
 logic [7:0] filter_pe_r [0:2];
 logic [7:0] filter_bank [0:2][0:2];
 
@@ -106,6 +142,7 @@ logic op_hs;
 logic [5:0] w_last;
 logic at_last_op;
 logic [1:0] active_filter_col;
+logic [1:0] one_by_one_phase;
 logic [1:0] state_ifmap_need;
 logic state_ifmap_done;
 logic s5_done;
@@ -113,13 +150,15 @@ logic [4:0] s3_repeat_cnt;
 logic s3_last_repeat;
 logic at_last_1x1;
 
-assign first_col = (filter_col_index == 3'd0) & compute_state;
-assign last_col = (filter_col_index == 3'd2) & compute_state;
-assign first_channel = (ifmap_ch_index == 9'd0) & compute_state;
-assign last_channel = (ifmap_ch_index == cfg_c) & compute_state;
-assign boundary_final = (ofmap_row_index == cfg_e_last) & compute_state;
-assign boundary_en = (ofmap_row_index != cfg_e_last) & compute_state;
-assign pe_last = ((count7 == 3'd6) || (ofmap_col_index_r == cfg_f_last)) & compute_state & last_col;
+// These sidebands travel with the registered PE operands.  The top samples
+// them when ifmap_valid/filter_valid produce the PE fire one cycle later.
+assign first_col = first_col_r;
+assign last_col = last_col_r;
+assign first_channel = first_channel_r;
+assign last_channel = last_channel_r;
+assign boundary_final = boundary_final_r;
+assign boundary_en = boundary_en_r;
+assign pe_last = pe_last_r;
 
 
 assign compute_state = (curr == COMPUTE_S1) ||
@@ -138,7 +177,18 @@ always_comb begin
     endcase
 end
 
-assign selected_ifmap_valid = |(ifmap_in_valid & ifmap_stream_sel);
+always_comb begin
+    unique case (w_cnt)
+        6'd0,  6'd3,  6'd6,  6'd9,  6'd12, 6'd15,
+        6'd18, 6'd21, 6'd24, 6'd27, 6'd30, 6'd33: ifmap_col_bank_sel = 3'b001;
+        6'd1,  6'd4,  6'd7,  6'd10, 6'd13, 6'd16,
+        6'd19, 6'd22, 6'd25, 6'd28, 6'd31, 6'd34: ifmap_col_bank_sel = 3'b010;
+        default: ifmap_col_bank_sel = 3'b100;
+    endcase
+end
+
+assign selected_ifmap_valid = mode[0] ? (&ifmap_in_valid) :
+                                           (|(ifmap_in_valid & ifmap_col_bank_sel));
 assign ifmap_req_state = (curr == COMPUTE_S1) ||
                          (curr == COMPUTE_S2) ||
                          (curr == COMPUTE_S3) ||
@@ -173,7 +223,7 @@ end
 assign state_ifmap_done = op_hs & ((state_ifmap_cnt + 2'd1) == state_ifmap_need);
 assign s5_done = state_ifmap_done & (curr == COMPUTE_S5);
 assign s3_last_repeat = (cfg_f_last <= 5'd1) || (s3_repeat_cnt >= (cfg_f_last - 5'd2));
-assign active_filter_col = mode[0] ? 2'd0 : filter_col_cnt;
+assign active_filter_col = mode[0] ? one_by_one_phase : filter_col_cnt;
 
 always_comb begin
     if (mode[0]) begin
@@ -196,7 +246,7 @@ always_comb begin
 end
 
 assign ctrl_ready = (curr == LOAD_SRAM);
-assign ifmap_ready = ifmap_req_state ? ifmap_stream_sel : 3'b000;
+assign ifmap_ready = ifmap_req_state ? (mode[0] ? 3'b111 : ifmap_col_bank_sel) : 3'b000;
 assign filter_ready = (curr == LOAD_FILTER) & !load_filter_done;
 assign ifmap_valid = ifmap_valid_r;
 assign filter_valid = filter_valid_r;
@@ -206,16 +256,42 @@ assign opsum = '0;
 assign pe_block_en = compute_state;
 assign ofmap_col_index = ofmap_col_index_r;
 assign filter_col_index = filter_col_index_r;
+// These indices also drive the controller-side SRAM addresses, so they remain
+// live FSM counters.  PE sidebands that need cycle alignment are registered above.
 assign ifmap_ch_index = c_cnt;
 assign ofmap_row_index = e_cnt;
+assign ofmap_ch_index = m_cnt;
+assign ifmap_col_index = w_cnt;
+assign filter_load_index = load_filter_cnt;
+assign layer_done = layer_done_r;
+assign compute_sram_sel = compute_sram_sel_r;
+assign preload_sram_sel = preload_sram_sel_r;
+assign current_m = m_cnt;
+assign next_m = m_cnt + 9'd1;
+assign last_channel_compute = (m_cnt == (cfg_m - 9'd1));
+assign channel_compute_done = (curr == COMPUTE_S5 && state_ifmap_done &&
+                               c_cnt == (cfg_c - 9'd1) && e_cnt == cfg_e_last) ||
+                              (curr == COMPUTE_1X1 && state_ifmap_done &&
+                               w_cnt == {1'b0, cfg_f_last} && c_cnt == (cfg_c - 9'd1) &&
+                               e_cnt == cfg_e_last);
+assign compute_done = channel_compute_done;
+assign preload_start = compute_state && !last_channel_compute;
+assign swap_enable = channel_compute_done && preload_done && !last_channel_compute;
 
-assign ifmap_pe_0 = ifmap_pe_r[0];
-assign ifmap_pe_1 = ifmap_pe_r[1];
-assign ifmap_pe_2 = ifmap_pe_r[2];
-assign ifmap_pe_3 = ifmap_pe_r[3];
-assign ifmap_pe_4 = ifmap_pe_r[4];
-assign ifmap_pe_5 = ifmap_pe_r[5];
-assign ifmap_pe_6 = ifmap_pe_r[6];
+// Legacy signals expose operand group 0 for existing 3x3 TB/debug code.
+assign ifmap_pe_0 = ifmap_pe_r[0][0];
+assign ifmap_pe_1 = ifmap_pe_r[0][1];
+assign ifmap_pe_2 = ifmap_pe_r[0][2];
+assign ifmap_pe_3 = ifmap_pe_r[0][3];
+assign ifmap_pe_4 = ifmap_pe_r[0][4];
+assign ifmap_pe_5 = ifmap_pe_r[0][5];
+assign ifmap_pe_6 = ifmap_pe_r[0][6];
+assign ifmap_pe_group_0 = {ifmap_pe_r[0][6], ifmap_pe_r[0][5], ifmap_pe_r[0][4],
+                           ifmap_pe_r[0][3], ifmap_pe_r[0][2], ifmap_pe_r[0][1], ifmap_pe_r[0][0]};
+assign ifmap_pe_group_1 = {ifmap_pe_r[1][6], ifmap_pe_r[1][5], ifmap_pe_r[1][4],
+                           ifmap_pe_r[1][3], ifmap_pe_r[1][2], ifmap_pe_r[1][1], ifmap_pe_r[1][0]};
+assign ifmap_pe_group_2 = {ifmap_pe_r[2][6], ifmap_pe_r[2][5], ifmap_pe_r[2][4],
+                           ifmap_pe_r[2][3], ifmap_pe_r[2][2], ifmap_pe_r[2][1], ifmap_pe_r[2][0]};
 assign filter_pe_0 = filter_pe_r[0];
 assign filter_pe_1 = filter_pe_r[1];
 assign filter_pe_2 = filter_pe_r[2];
@@ -237,24 +313,24 @@ always_comb begin
         COMPUTE_S4:  next = state_ifmap_done ? COMPUTE_S5 : COMPUTE_S4;
         COMPUTE_S5: begin
             if (state_ifmap_done) begin
-                if (at_last_op) begin
-                    next = DONE;
-                end else begin
-                    next = LOAD_FILTER;
-                end
+                if (at_last_op) next = DONE;
+                else if (c_cnt == (cfg_c - 9'd1) && e_cnt == cfg_e_last)
+                    next = preload_done ? SWAP_SRAM : WAIT_PRELOAD;
+                else next = LOAD_FILTER;
             end
         end
         COMPUTE_1X1: begin
             if (state_ifmap_done) begin
-                if (at_last_1x1) begin
-                    next = DONE;
-                end else if (w_cnt == {1'b0, cfg_f_last}) begin
-                    next = LOAD_FILTER;
-                end else begin
-                    next = COMPUTE_1X1;
-                end
+                if (at_last_1x1) next = DONE;
+                else if (w_cnt == {1'b0, cfg_f_last}) begin
+                    if (c_cnt == (cfg_c - 9'd1) && e_cnt == cfg_e_last)
+                        next = preload_done ? SWAP_SRAM : WAIT_PRELOAD;
+                    else next = LOAD_FILTER;
+                end else next = COMPUTE_1X1;
             end
         end
+        WAIT_PRELOAD: next = preload_done ? SWAP_SRAM : WAIT_PRELOAD;
+        SWAP_SRAM: next = LOAD_FILTER;
         DONE:        next = pe_en ? DONE : IDLE;
         default:     next = IDLE;
     endcase
@@ -368,12 +444,36 @@ always_ff @(posedge clk or posedge rst) begin
                 filter_col_cnt <= 2'd0;
             end
             COMPUTE_1X1: begin
-                filter_col_cnt <= 2'd0;
                 if (w_cnt < {1'b0, cfg_f_last}) w_cnt <= w_cnt + 6'd1;
                 else w_cnt <= 6'd0;
             end
             default: ;
         endcase
+    end
+end
+
+// In 1x1 mode filter_col_index is an accumulator stage-1 phase, not a
+// spatial filter column.  It advances only with an accepted PE operand.
+always_ff @(posedge clk or posedge rst) begin
+    if (rst) begin
+        one_by_one_phase <= 2'd0;
+    end else if (curr == IDLE || curr == DONE || curr == LOAD_CONFIG || curr == LOAD_SRAM) begin
+        one_by_one_phase <= 2'd0;
+    end else if (op_hs && curr == COMPUTE_1X1) begin
+        one_by_one_phase <= (one_by_one_phase == 2'd2) ? 2'd0 : (one_by_one_phase + 2'd1);
+    end
+end
+
+always_ff @(posedge clk or posedge rst) begin
+    if (rst) begin
+        compute_sram_sel_r <= 1'b0;
+        preload_sram_sel_r <= 1'b1;
+    end else if (curr == LOAD_CONFIG) begin
+        compute_sram_sel_r <= 1'b0;
+        preload_sram_sel_r <= 1'b1;
+    end else if (curr == SWAP_SRAM) begin
+        compute_sram_sel_r <= preload_sram_sel_r;
+        preload_sram_sel_r <= compute_sram_sel_r;
     end
 end
 
@@ -433,59 +533,78 @@ always_ff @(posedge clk or posedge rst) begin
         filter_valid_r <= 1'b0;
         ofmap_col_index_r <= 5'd0;
         filter_col_index_r <= 3'd0;
+        ifmap_ch_index_r <= 9'd0;
+        ofmap_row_index_r <= 5'd0;
+        ofmap_ch_index_r <= 9'd0;
+        ifmap_col_index_r <= 6'd0;
+        first_col_r <= 1'b0;
+        last_col_r <= 1'b0;
+        first_channel_r <= 1'b0;
+        last_channel_r <= 1'b0;
+        boundary_final_r <= 1'b0;
+        boundary_en_r <= 1'b0;
+        pe_last_r <= 1'b0;
+        layer_done_r <= 1'b0;
         count7 <= 3'd0;
     end else begin
         ifmap_valid_r <= 3'b000;
         filter_valid_r <= 1'b0;
         if (op_hs) begin
-            ifmap_valid_r <= ifmap_stream_sel;
+            ifmap_valid_r <= mode[0] ? 3'b111 : ifmap_col_bank_sel;
             filter_valid_r <= 1'b1;
             ofmap_col_index_r <= next_ofmap_col_index;
             count7 <= next_count7;
-            if (mode[0]) begin
-                filter_col_index_r <= 3'd0;
-            end else begin
-                filter_col_index_r <= {1'b0, active_filter_col};
-            end
+            ifmap_ch_index_r <= c_cnt;
+            ofmap_row_index_r <= e_cnt;
+            ofmap_ch_index_r <= m_cnt;
+            ifmap_col_index_r <= w_cnt;
+            first_col_r <= !mode[0] && (filter_col_cnt == 2'd0);
+            last_col_r <= !mode[0] && (filter_col_cnt == 2'd2);
+            first_channel_r <= (c_cnt == 9'd0);
+            last_channel_r <= (c_cnt == (cfg_c - 9'd1));
+            boundary_final_r <= (e_cnt == cfg_e_last);
+            boundary_en_r <= (e_cnt != cfg_e_last);
+            pe_last_r <= mode[0] ? at_last_1x1 :
+                         (((next_count7 == 3'd6) || (next_ofmap_col_index == cfg_f_last)) &&
+                          (filter_col_cnt == 2'd2));
+            layer_done_r <= mode[0] ? at_last_1x1 : at_last_op;
+            filter_col_index_r <= {1'b0, active_filter_col};
         end
     end
 end
 
 always_ff @(posedge clk or posedge rst) begin
     if (rst) begin
-        for (int i = 0; i < 7; i++) begin
-            ifmap_pe_r[i] <= 8'd0;
+        for (int bank = 0; bank < 3; bank++) begin
+            for (int row = 0; row < 7; row++) begin
+                ifmap_pe_r[bank][row] <= 8'd0;
+            end
         end
     end else if (op_hs) begin
-        unique case (ifmap_stream_sel)
-            3'b001: begin
-                ifmap_pe_r[0] <= {~ifmap_0[7], ifmap_0[6:0]};
-                ifmap_pe_r[1] <= {~ifmap_0[15], ifmap_0[14:8]};
-                ifmap_pe_r[2] <= {~ifmap_0[23], ifmap_0[22:16]};
-                ifmap_pe_r[3] <= {~ifmap_0[31], ifmap_0[30:24]};
-                ifmap_pe_r[4] <= {~ifmap_0[39], ifmap_0[38:32]};
-                ifmap_pe_r[5] <= {~ifmap_0[47], ifmap_0[46:40]};
-                ifmap_pe_r[6] <= {~ifmap_0[55], ifmap_0[54:48]};
+        if (mode[0]) begin
+            // A 1x1 group consumes all three SRAM-bank reads in the same
+            // handshake.  The count3 stream scheduler remains 3x3-only.
+            for (int row = 0; row < 7; row++) begin
+                ifmap_pe_r[0][row] <= {~ifmap_0[row*8 + 7], ifmap_0[row*8 +: 7]};
+                ifmap_pe_r[1][row] <= {~ifmap_1[row*8 + 7], ifmap_1[row*8 +: 7]};
+                ifmap_pe_r[2][row] <= {~ifmap_2[row*8 + 7], ifmap_2[row*8 +: 7]};
             end
-            3'b010: begin
-                ifmap_pe_r[0] <= {~ifmap_1[7], ifmap_1[6:0]};
-                ifmap_pe_r[1] <= {~ifmap_1[15], ifmap_1[14:8]};
-                ifmap_pe_r[2] <= {~ifmap_1[23], ifmap_1[22:16]};
-                ifmap_pe_r[3] <= {~ifmap_1[31], ifmap_1[30:24]};
-                ifmap_pe_r[4] <= {~ifmap_1[39], ifmap_1[38:32]};
-                ifmap_pe_r[5] <= {~ifmap_1[47], ifmap_1[46:40]};
-                ifmap_pe_r[6] <= {~ifmap_1[55], ifmap_1[54:48]};
-            end
-            default: begin
-                ifmap_pe_r[0] <= {~ifmap_2[7], ifmap_2[6:0]};
-                ifmap_pe_r[1] <= {~ifmap_2[15], ifmap_2[14:8]};
-                ifmap_pe_r[2] <= {~ifmap_2[23], ifmap_2[22:16]};
-                ifmap_pe_r[3] <= {~ifmap_2[31], ifmap_2[30:24]};
-                ifmap_pe_r[4] <= {~ifmap_2[39], ifmap_2[38:32]};
-                ifmap_pe_r[5] <= {~ifmap_2[47], ifmap_2[46:40]};
-                ifmap_pe_r[6] <= {~ifmap_2[55], ifmap_2[54:48]};
-            end
-        endcase
+        end else begin
+            unique case (ifmap_col_bank_sel)
+                3'b001: begin
+                    for (int row = 0; row < 7; row++)
+                        ifmap_pe_r[0][row] <= {~ifmap_0[row*8 + 7], ifmap_0[row*8 +: 7]};
+                end
+                3'b010: begin
+                    for (int row = 0; row < 7; row++)
+                        ifmap_pe_r[0][row] <= {~ifmap_1[row*8 + 7], ifmap_1[row*8 +: 7]};
+                end
+                default: begin
+                    for (int row = 0; row < 7; row++)
+                        ifmap_pe_r[0][row] <= {~ifmap_2[row*8 + 7], ifmap_2[row*8 +: 7]};
+                end
+            endcase
+        end
     end
 end
 
@@ -497,9 +616,17 @@ always_ff @(posedge clk or posedge rst) begin
     end 
     else begin
         if (op_hs) begin
-            filter_pe_r[0] <= filter_bank[active_filter_col][0];
-            filter_pe_r[1] <= filter_bank[active_filter_col][1];
-            filter_pe_r[2] <= filter_bank[active_filter_col][2];
+            if (mode[0]) begin
+                // 1x1 phase is accumulator metadata.  The current filter beat
+                // remains the packed {wch0, wch1, wch2} group in bank 0.
+                filter_pe_r[0] <= filter_bank[0][0];
+                filter_pe_r[1] <= filter_bank[0][1];
+                filter_pe_r[2] <= filter_bank[0][2];
+            end else begin
+                filter_pe_r[0] <= filter_bank[active_filter_col][0];
+                filter_pe_r[1] <= filter_bank[active_filter_col][1];
+                filter_pe_r[2] <= filter_bank[active_filter_col][2];
+            end
         end
     end
 end
